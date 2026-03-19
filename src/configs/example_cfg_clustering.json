@@ -1,0 +1,75 @@
+{
+    "score_thr_2d": [0.4, 0.4, 0.4],
+    "score_thr_3d": [0.1, 0.1, 0.1],
+    "bbox_matching_iou_thr": 0.4,
+    "bbox_matching_mode": "iou",
+    "detection_recovery_iou_thr": 0.3,
+    "min_pts_frustum": 10,
+
+    "use_clustering": true,
+    "clustering_method": "connected_components",
+    "use_cliques": false,
+    "cluster_bev_iou_thr": 0.5,
+    "cluster_bev_iou_thr_cc": 0.5,
+    "cluster_bev_iou_thr_clique": 0.3,
+    "cluster_iou_thr": 0.1,
+    "cluster_iou_thr_cc": 0.1,
+    "cluster_iou_thr_clique": 0.1,
+
+    "align_frustum": true,
+    "use_gaussian_likelihoods": true,
+    "enlarge_factor": 0.05,
+
+    "use_detection_recovery": true,
+    "use_label_fusion": true,
+    "use_score_fusion": true,
+    "use_final_nms": false,
+    "keep_oov_bboxes": false,
+    "class_prior": [0.33, 0.33, 0.33],
+
+    "num_classes": 3,
+    "classes": ["Pedestrian", "Cyclist", "Car"],
+
+    "final_nms_cfg": {
+        "thresh": 0.3,
+        "pre_max_size": 100,
+        "post_max_size": 100
+    },
+
+    "visualization_cfg": {
+        "colors": [
+            [178, 255, 102],
+            [255, 102, 178],
+            [153, 255, 255]
+        ],
+        "fill_bboxes_2d": true,
+        "alpha": 50
+    },
+
+    "detector2d": {
+        "model_type": "mmdet",
+        "nms_thr": null,
+        "nms_type": null,
+        "nms_pre": null,
+        "max_num": null,
+        "valid_2d_classes": [0, 1, 2],
+        "img_label_mapping": [2, 0, 1],
+        "cfg_path": "/mnt/proj2/eu-25-52/models/kitti/faster_rcnn_3class/base_faster_rcnn_fpn_3class.py",
+        "checkpoint_path": "/mnt/proj2/eu-25-52/models/kitti/faster_rcnn_3class/best_coco_bbox_mAP_epoch_200.pth"
+    },
+
+    "detector3d": {
+        "nms_thr": 0.5,
+        "nms_pre": 10000,
+        "max_num": 10000,
+        "valid_labels_3d": [0, 1, 2],
+        "class_mapping_3d": [0, 1, 2],
+        "cfg_path": "/home/it4i-carlos00/LCF3D/src/mmdetection3d/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class_low_nms.py",
+        "checkpoint_path": "/mnt/proj2/eu-25-52/models/kitti/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37dc2420.pth"
+    },
+
+    "frustum_detector": {
+        "cfg_path": "/mnt/proj2/eu-25-52/models/kitti/frustum_pointnet_single_view/frustum_pointnet_single_one_hot_dynamic_sample_dataset.py",
+        "checkpoint_path": "/mnt/proj2/eu-25-52/models/kitti/frustum_pointnet_single_view/best_IoU_3D_epoch_76.pth"
+    }
+}
