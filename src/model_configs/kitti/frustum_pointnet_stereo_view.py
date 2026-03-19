@@ -5,7 +5,7 @@ class_names = [
     'Cyclist',
     'Car',
 ]
-data_root = '/path/to/frustum_datasets/'
+data_root = '/mnt/proj2/dd-24-8/frustum_datasets/v12/'
 dataset_type = 'FrustumDataset'
 default_hooks = dict(
     checkpoint=dict(
@@ -391,7 +391,8 @@ test_cfg = dict()
 test_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file=data_root + 'kitti_frustum_info_val.pkl',
+        ann_file=
+        '/mnt/proj2/dd-24-8/frustum_datasets/v12/kitti_frustum_info_val.pkl',
         backend_args=None,
         box_type_3d='LiDAR',
         metainfo=dict(classes=[
@@ -600,7 +601,8 @@ train_dataloader = dict(
     batch_size=32,
     dataset=dict(
         dataset=dict(
-            ann_file=data_root + 'kitti_frustum_info_train.pkl',
+            ann_file=
+            '/mnt/proj2/dd-24-8/frustum_datasets/v12/kitti_frustum_info_train.pkl',
             backend_args=None,
             box_type_3d='LiDAR',
             metainfo=dict(classes=[
@@ -830,7 +832,8 @@ val_cfg = dict()
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file=data_root + 'kitti_frustum_info_val.pkl',
+        ann_file=
+        '/mnt/proj2/dd-24-8/frustum_datasets/v12/kitti_frustum_info_val.pkl',
         backend_args=None,
         box_type_3d='LiDAR',
         load_eval_anns=True,
@@ -958,3 +961,4 @@ visualizer = dict(
         dict(type='LocalVisBackend'),
         dict(type='TensorboardVisBackend'),
     ])
+work_dir = '/mnt/proj2/dd-24-8/mmdetection_work_dir/frustum_pointnet_dataset_v12'
