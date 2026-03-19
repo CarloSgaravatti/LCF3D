@@ -4,6 +4,8 @@
 
 LCF3D is a modular late-cascade fusion framework for 3D object detection that combines LiDAR-based 3D detectors with camera-based 2D detectors. It supports **single-view**, **stereo**, and **multi-view** camera setups, and includes detection recovery via a Frustum Localizer for 2D detections that are missed by the 3D branch.
 
+Paper can be accessed [here](https://arxiv.org/abs/2601.09812)
+
 ## Getting Started
 
 ### 1. Clone the repository
