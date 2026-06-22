@@ -448,8 +448,11 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
         bboxes_proj_valid = bboxes_proj[inside_image]
         
         # Initialize result dict
+        # oov_mask starts all-True; only matched boxes will be set to False below.
+        # This mirrors old code: a box is "not OOV" only if matched to a 2D detection,
+        # so visible-but-unmatched boxes are kept just like geometrically-OOV boxes.
         result = {
-            'oov_mask': ~valid_mask,  # OOV = not valid in this view
+            'oov_mask': torch.ones(bboxes_3d.shape[0], dtype=torch.bool, device=bboxes_3d.device),
             'matched_bboxes_3d': bboxes_3d.new_empty((0, bboxes_3d.shape[1])),
             'matched_scores_3d': scores_3d.new_empty((0,)),
             'matched_labels_3d': labels_3d.new_empty((0,), dtype=torch.long),
@@ -562,7 +565,13 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
         result['unmatched_bboxes_2d'] = bboxes_2d[unmatched_2d_mask]
         result['unmatched_scores_2d'] = scores_2d[unmatched_2d_mask]
         result['unmatched_labels_2d'] = labels_2d[unmatched_2d_mask]
-        
+
+        # Mark matched 3D boxes as not-OOV. Visible-but-unmatched boxes stay True
+        # (oov_mask=True) so they are kept alongside geometrically-OOV boxes — same
+        # behaviour as the old code where out_of_view_mask tracked "not matched anywhere".
+        valid_indices = torch.where(valid_mask)[0]
+        result['oov_mask'][valid_indices[matched_3d_mask]] = False
+
         return result
     
     def semantic_fusion(self, bboxes_3d, scores_3d, labels_3d, bboxes_2d, scores_2d, labels_2d):
