@@ -140,7 +140,7 @@ test_dataloader = dict(
         ann_file='/mnt/proj2/dd-24-8/val_annot_coco.json',
         backend_args=None,
         data_prefix=dict(img='data_object_image_2/training/image_2'),
-        metainfo=dict(classes=('Pedestrian', 'Cyclist', 'Car')),
+        metainfo=dict(classes=('Car', 'Pedestrian', 'Cyclist')),
         data_root='/mnt/proj2/dd-24-8',
         pipeline=[
             dict(backend_args=None, type='LoadImageFromFile'),
@@ -195,7 +195,7 @@ train_dataloader = dict(
         ann_file='/mnt/proj2/dd-24-8/train_annot_coco.json',
         backend_args=None,
         data_prefix=dict(img='data_object_image_2/training/image_2'),
-        metainfo=dict(classes=('Pedestrian', 'Cyclist', 'Car')),
+        metainfo=dict(classes=('Car', 'Pedestrian', 'Cyclist')),
         data_root='/mnt/proj2/dd-24-8',
         filter_cfg=dict(filter_empty_gt=True, min_size=32),
         pipeline=[
