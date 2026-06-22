@@ -1,8 +1,8 @@
 {
     "num_views": 6,
 
-    "score_thr_3d": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
-    "bbox_matching_iou_thr": 0.4,
+    "score_thr_3d": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
+    "bbox_matching_iou_thr": 0.5,
     "bbox_matching_mode": "iou",
     "detection_recovery_iou_thr": 0.3,
     "min_pts_frustum": 10,
@@ -37,8 +37,8 @@
     "final_nms_cfg": {
         "thresh": 0.3,
         "score_thr": 0.01,
-        "pre_max_size": 100,
-        "post_max_size": 100
+        "pre_max_size": 500,
+        "post_max_size": 500
     },
 
     "visualization_cfg": {
@@ -60,30 +60,30 @@
 
     "detector2d": {
         "model_type": "mmdet",
-        "nms_thr": 0.5,
+        "nms_thr": 0.8,
         "nms_type": "nms",
         "nms_pre": null,
         "max_num": null,
-        "score_thr": [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3],
+        "score_thr": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
         "valid_2d_classes": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
         "img_label_mapping": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        "cfg_path": "/mnt/proj2/eu-25-52/models/nuscenes/faster_rcnn_nuimages_nuscenes/faster_rcnn_nuimages_nuscenes.py",
-        "checkpoint_path": "/mnt/proj2/eu-25-52/models/nuscenes/faster_rcnn_nuimages_nuscenes/best_coco_bbox_mAP_epoch_9.pth"
+        "cfg_path": "/leonardo_work/CNHPC_1494684/models_carlo/nuscenes/faster_rcnn_nuimages_nuscenes/faster_rcnn_nuimages_nuscenes.py",
+        "checkpoint_path": "/leonardo_work/CNHPC_1494684/models_carlo/nuscenes/faster_rcnn_nuimages_nuscenes/best_coco_bbox_mAP_epoch_9.pth"
     },
 
     "detector3d": {
-        "nms_thr": 0.01,
-        "nms_pre": 100,
-        "max_num": 50,
-        "score_thr": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+        "nms_thr": 0.9,
+        "nms_pre": 10000,
+        "max_num": 500,
+        "score_thr": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
         "valid_labels_3d": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
         "class_mapping_3d": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        "cfg_path": "/home/it4i-carlos00/LCF3D/src/mmdetection3d/configs/pointpillars/pointpillars_hv_fpn_sbn-all_8xb4-2x_nus-3d.py",
-        "checkpoint_path": "/mnt/proj2/eu-25-52/models/nuscenes/hv_pointpillars_fpn_sbn-all_4x8_2x_nus-3d_20210826_104936-fca299c1.pth"
+        "cfg_path": "/leonardo/home/userexternal/csgarava/LCF3D/src/mmdetection3d/configs/pointpillars/pointpillars_hv_fpn_sbn-all_8xb4-2x_nus-3d.py",
+        "checkpoint_path": "/leonardo_work/CNHPC_1494684/models_carlo/nuscenes/hv_pointpillars_fpn_sbn-all_4x8_2x_nus-3d_20210826_104936-fca299c1.pth"
     },
 
     "frustum_detector": {
-        "cfg_path": "/mnt/proj2/eu-25-52/models/nuscenes/frustum_pointnet_nuscenes_gaussian_likelihood/frustum_pointnet_nuscenes_v3_all_classes.py",
-        "checkpoint_path": "/mnt/proj2/eu-25-52/models/nuscenes/frustum_pointnet_nuscenes_gaussian_likelihood/best_IoU_3D_epoch_96.pth"
+        "cfg_path": "/leonardo_work/CNHPC_1494684/models_carlo/nuscenes/frustum_pointnet_nuscenes_gaussian_likelihood/frustum_pointnet_nuscenes_v3_all_classes.py",
+        "checkpoint_path": "/leonardo_work/CNHPC_1494684/models_carlo/nuscenes/frustum_pointnet_nuscenes_gaussian_likelihood/best_IoU_3D_epoch_96.pth"
     }
 }

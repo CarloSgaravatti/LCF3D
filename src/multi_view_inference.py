@@ -11,6 +11,7 @@ from visualization.visualization_utils import *
 from base_inference import BaseLateFusionInferencer
 
 from mmdet.models.task_modules import BboxOverlaps2D
+from mmcv.ops import box_iou_rotated
 from mmdet3d.structures import xywhr2xyxyr
 from mmdet3d.models.layers import box3d_multiclass_nms, nms_bev
 from mmengine.structures import InstanceData
@@ -101,6 +102,7 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
 
         self.cluster_iou_thr_cc = self.late_fusion_cfg.get('cluster_iou_thr_cc', self.late_fusion_cfg.get('cluster_iou_thr', 0.1))
         self.cluster_iou_thr_clique = self.late_fusion_cfg.get('cluster_iou_thr_clique', self.late_fusion_cfg.get('cluster_iou_thr', 0.1))
+        self.cluster_bev_iou_thr = self.late_fusion_cfg.get('cluster_bev_iou_thr', 0.5)
         self.oov_score_thr = self.late_fusion_cfg.get('oov_score_thr', 0.3)
     
     def find_cluster_max(self, bboxes_3d, labels_3d, scores_3d, clusters, num_clusters):
@@ -138,7 +140,48 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             max_indices
         )
     
-    def single_view_matching(self, bboxes_proj, cluster_ids, bboxes_2d, num_clusters, 
+    def _pre_cluster_3d_bev(self, bboxes_3d, labels_3d, scores_3d):
+        """Cluster 3D boxes in BEV space once globally before any per-view processing.
+
+        Groups boxes that represent the same physical object (overlapping in 3D BEV),
+        respecting class boundaries. Mirrors the old code's clique/CC clustering that was
+        done on 3D BEV IoU rather than on 2D projected IoU.
+
+        Returns:
+            cluster_ids: (N_exp,) cluster ID per (possibly expanded) box
+            num_clusters: int
+            orig_ids: (N_exp,) index into the original bboxes_3d for each expanded slot
+        """
+        N = bboxes_3d.shape[0]
+        if N == 0:
+            empty = torch.zeros(0, dtype=torch.long, device=bboxes_3d.device)
+            return empty, 0, empty
+
+        bev = self.box_type_3d(bboxes_3d, box_dim=bboxes_3d.shape[-1]).bev
+        iou_bev = box_iou_rotated(bev, bev, aligned=False, mode='iou')
+        diff_classes = labels_3d[:, None] != labels_3d[None, :]
+        iou_bev[diff_classes] = 0
+
+        adj_np = (iou_bev > self.cluster_bev_iou_thr).cpu().numpy()
+        np.fill_diagonal(adj_np, 0)
+
+        if self.clustering_method == 'cliques':
+            G = nx.from_scipy_sparse_array(sp.csr_matrix(adj_np))
+            cliques = list(nx.find_cliques(G))
+            cluster_labels = sum([[i] * len(c) for i, c in enumerate(cliques)], [])
+            bboxes_ids = sum(cliques, [])
+            cluster_ids = torch.tensor(cluster_labels, device=bboxes_3d.device, dtype=torch.long)
+            orig_ids = torch.tensor(bboxes_ids, device=bboxes_3d.device, dtype=torch.long)
+            num_clusters = len(cliques)
+        else:  # connected_components
+            num_clusters, cluster_labels = connected_components(
+                sp.csr_matrix(adj_np), directed=False)
+            cluster_ids = torch.tensor(cluster_labels, device=bboxes_3d.device, dtype=torch.long)
+            orig_ids = torch.arange(N, device=bboxes_3d.device)
+
+        return cluster_ids, num_clusters, orig_ids
+
+    def single_view_matching(self, bboxes_proj, cluster_ids, bboxes_2d, num_clusters,
                              match_iou_thr=0.4, mode='iou'):
         """
         Match clusters of 3D boxes to 2D detections using cluster-wise IoU.
@@ -200,9 +243,32 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             pc_file, points=points
         )
         
-        # Track out-of-view detections across all views
-        oov_mask = torch.ones(bboxes_3d.shape[0], dtype=torch.bool, device=self.device)
-        
+        # Pre-cluster 3D boxes in BEV space (once globally, before any view loop).
+        # Old code did this on 3D BEV IoU with class awareness; the 2D projected clustering
+        # that was here before is NOT equivalent and produced worse results.
+        if self.use_clustering:
+            cluster_ids, num_clusters, orig_ids = self._pre_cluster_3d_bev(
+                bboxes_3d, labels_3d, scores_3d)
+            bboxes_3d = bboxes_3d[orig_ids]
+            corners_3d = corners_3d[orig_ids]
+            labels_3d = labels_3d[orig_ids]
+            scores_3d = scores_3d[orig_ids]
+        else:
+            cluster_ids = None
+            num_clusters = None
+
+        # Only cluster representatives (max-score per cluster) can be OOV candidates.
+        # Non-representative cluster members are not returned as standalone detections —
+        # they exist only to improve cluster IoU matching. Mirrors old code:
+        #   out_of_view_mask[max_indices] = True  (everything else starts False)
+        oov_mask = torch.zeros(bboxes_3d.shape[0], dtype=torch.bool, device=self.device)
+        if self.use_clustering and cluster_ids is not None:
+            _, _, _, rep_indices = self.find_cluster_max(
+                bboxes_3d, labels_3d, scores_3d, cluster_ids, num_clusters)
+            oov_mask[rep_indices] = True
+        else:
+            oov_mask[:] = True
+
         # Store matched detections from all views
         all_matched_bboxes_3d = []
         all_matched_scores_3d = []
@@ -229,7 +295,7 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             matching_result = self.bbox_matching_single_view(
                 bboxes_3d, scores_3d, labels_3d, corners_3d,
                 bboxes_2d, scores_2d, labels_2d, img_shape,
-                ltc, cti
+                ltc, cti, cluster_ids=cluster_ids, num_clusters=num_clusters
             )
             
             # Update OOV mask (intersection across all views)
@@ -408,7 +474,8 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
     
     def bbox_matching_single_view(self, bboxes_3d, scores_3d, labels_3d, corners_3d,
                                   bboxes_2d, scores_2d, labels_2d, img_shape,
-                                  lidar_to_cam, cam_to_img):
+                                  lidar_to_cam, cam_to_img,
+                                  cluster_ids=None, num_clusters=None):
         """
         Match 3D bboxes with 2D detections for a single view.
         
@@ -468,68 +535,39 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             return result
         
         # Perform matching with optional clustering
-        if self.use_clustering:
-            # Use clustering-based matching (aggregate multiple 3D boxes into clusters)
-            # Build adjacency matrix based on IoU
-            iou_matrix = BboxOverlaps2D()(bboxes_proj_valid, bboxes_proj_valid, mode=self.bb_match_mode)
-            if self.clustering_method == 'cliques':
-                adj_matrix = iou_matrix > self.cluster_iou_thr_clique
-                adj_np = adj_matrix.cpu().numpy()
-                np.fill_diagonal(adj_np, 0)
+        if self.use_clustering and cluster_ids is not None:
+            # Use pre-computed 3D BEV cluster IDs (computed once globally in predict()).
+            # Filter to boxes visible in this view and re-map cluster IDs to 0..N-1.
+            cluster_ids_valid = cluster_ids[valid_mask]
+            unique_clusters = torch.unique(cluster_ids_valid)
+            num_visible_clusters = unique_clusters.shape[0]
+            cluster_remap = cluster_ids_valid.new_full(
+                (int(cluster_ids_valid.max().item()) + 1,), -1)
+            cluster_remap[unique_clusters] = torch.arange(
+                num_visible_clusters, device=cluster_ids_valid.device,
+                dtype=cluster_ids_valid.dtype)
+            cluster_ids_local = cluster_remap[cluster_ids_valid]
 
-                sparse_matrix = sp.csr_matrix(adj_np)
-                G = nx.from_scipy_sparse_array(sparse_matrix)
-                cliques = list(nx.find_cliques(G))
-                cluster_labels = sum([[i] * len(clique) for i, clique in enumerate(cliques)], [])
-                bboxes_ids = sum(cliques, [])
-                cluster_ids = torch.tensor(cluster_labels, device=bboxes_proj_valid.device, dtype=torch.long)
-                num_clusters = len(cliques)
-
-                # Work on expanded arrays (cliques can overlap).
-                bboxes_3d_exp = bboxes_3d_valid[bboxes_ids]
-                labels_3d_exp = labels_3d_valid[bboxes_ids]
-                scores_3d_exp = scores_3d_valid[bboxes_ids]
-
-                bboxes_3d_clusters, labels_3d_clusters, scores_3d_clusters, max_indices = self.find_cluster_max(
-                    bboxes_3d_exp, labels_3d_exp, scores_3d_exp, cluster_ids, num_clusters
-                )
-                bboxes_proj_clusters = bboxes_proj_valid[bboxes_ids][max_indices]
-
-                # Map back to original indices.
-                max_indices_orig = max_indices.new_tensor([bboxes_ids[i] for i in max_indices.tolist()])
-            else:
-                adj_matrix = iou_matrix > self.cluster_iou_thr_cc
-                adj_np = adj_matrix.cpu().numpy()
-                np.fill_diagonal(adj_np, 0)
-
-                # Find connected components (clusters)
-                num_clusters, cluster_ids = connected_components(
-                    sp.csr_matrix(adj_np), directed=False
-                )
-                cluster_ids = torch.tensor(cluster_ids, device=bboxes_proj_valid.device, dtype=torch.long)
-
-                # Get max score detection in each cluster
-                bboxes_3d_clusters, labels_3d_clusters, scores_3d_clusters, max_indices = self.find_cluster_max(
-                    bboxes_3d_valid, labels_3d_valid, scores_3d_valid, cluster_ids, num_clusters
-                )
-                bboxes_proj_clusters = bboxes_proj_valid[max_indices]
-                max_indices_orig = max_indices
-            
-            # Match clusters to 2D boxes
+            # Reduce IoU per cluster (max across all boxes in cluster), Hungarian match
             cluster_matching = self.single_view_matching(
-                bboxes_proj_clusters, torch.arange(num_clusters).to(bboxes_proj_valid.device),
-                bboxes_2d, num_clusters, match_iou_thr=self.bb_match_iou_thr,
+                bboxes_proj_valid, cluster_ids_local,
+                bboxes_2d, num_visible_clusters,
+                match_iou_thr=self.bb_match_iou_thr,
                 mode=self.bb_match_mode
             )
-            
-            # Extract matched indices
+
             matches_mask = cluster_matching > 0
             matched_2d_indices = (cluster_matching - 1)[matches_mask].long()
-            matched_3d_indices = torch.nonzero(matches_mask).squeeze(1)
-            
-            # Map back to original 3D box indices
-            matched_3d_mask = torch.zeros(bboxes_3d_valid.shape[0], dtype=torch.bool, device=bboxes_3d_valid.device)
-            matched_3d_mask[max_indices_orig[matched_3d_indices]] = True
+            matched_cluster_indices = torch.nonzero(matches_mask).squeeze(1)
+
+            # Representative of each matched cluster = max-score box in that cluster
+            _, _, _, max_indices_local = self.find_cluster_max(
+                bboxes_3d_valid, labels_3d_valid, scores_3d_valid,
+                cluster_ids_local, num_visible_clusters
+            )
+            matched_3d_mask = torch.zeros(
+                bboxes_3d_valid.shape[0], dtype=torch.bool, device=bboxes_3d_valid.device)
+            matched_3d_mask[max_indices_local[matched_cluster_indices]] = True
         else:
             # Standard matching without clustering
             if self.match_class:
@@ -576,23 +614,27 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
     
     def semantic_fusion(self, bboxes_3d, scores_3d, labels_3d, bboxes_2d, scores_2d, labels_2d):
         """
-        Fuse labels and scores from 2D and 3D detections using Bayesian fusion.
+        Fuse labels and scores from 2D and 3D detections.
+
+        When labels agree: score = score_3d * score_2d / class_prior (Bayesian product, unnormalized)
+        When labels disagree: score = score_2d, label = label_2d
+        Always returns 2D label (semantic fusion mode).
+
+        Mirrors old code in multi_view_single_frustum_with_cluster.py::semantic_fusion().
         """
-        # Use same implementation as single view
-        likelihood_2d = torch.zeros((labels_2d.shape[0], self.num_classes), device=self.device)
-        likelihood_2d[torch.arange(labels_2d.shape[0]), labels_2d] = scores_2d
-        
-        likelihood_3d = torch.zeros((labels_3d.shape[0], self.num_classes), device=self.device)
-        likelihood_3d[torch.arange(labels_3d.shape[0]), labels_3d] = scores_3d
-        
-        # Bayesian fusion
-        posterior = likelihood_2d * likelihood_3d * self.class_priors
-        posterior_sum = posterior.sum(dim=1, keepdim=True)
-        posterior = posterior / (posterior_sum + 1e-8)
-        
-        new_scores_3d, new_labels_3d = torch.max(posterior, dim=1)
-        
-        return new_labels_3d, new_scores_3d
+        different_labels = labels_3d != labels_2d
+        new_scores = scores_3d.clone()
+        new_labels = labels_2d.clone()
+
+        # Agreed labels: product / prior (unnormalized Bayesian)
+        agree = ~different_labels
+        new_scores[agree] = (scores_3d[agree] * scores_2d[agree]) / (
+            self.class_priors[labels_2d[agree].long()] + 1e-8)
+
+        # Disagreed labels: fall back to 2D score
+        new_scores[different_labels] = scores_2d[different_labels]
+
+        return new_labels, new_scores
     
     def detection_recovery_multi_view(self, collate_data, unmatched_bboxes_2d_list,
                                      unmatched_scores_2d_list, unmatched_labels_2d_list,
