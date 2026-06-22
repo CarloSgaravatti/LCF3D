@@ -88,18 +88,18 @@ class BaseLateFusionInferencer(ABC):
         # Extract frustum detector configuration
         self.frustum_detector_cfg = late_fusion_cfg.get('frustum_detector', {})
         
-        # Extract fusion configuration
+        # Extract fusion configuration (nested section; fall back to flat top-level keys)
         fusion_cfg = late_fusion_cfg.get('fusion', {})
         self.match_iou_thr = fusion_cfg.get('match_iou_thr', 0.1)
-        self.use_label_fusion = fusion_cfg.get('use_label_fusion', True)
+        self.use_label_fusion = fusion_cfg.get('use_label_fusion', late_fusion_cfg.get('use_label_fusion', True))
         self.label_fusion_cfg = fusion_cfg.get('label_fusion', {})
-        
-        # Detection recovery configuration
+
+        # Detection recovery configuration (nested section; fall back to flat top-level keys)
         recovery_cfg = late_fusion_cfg.get('detection_recovery', {})
-        self.use_detection_recovery = recovery_cfg.get('use_detection_recovery', True)
-        self.enlarge_factor = recovery_cfg.get('enlarge_factor', 0.1)
-        self.use_gaussian_likelihoods = recovery_cfg.get('use_gaussian_likelihoods', True)
-        self.align_frustum = recovery_cfg.get('align_frustum', True)
+        self.use_detection_recovery = recovery_cfg.get('use_detection_recovery', late_fusion_cfg.get('use_detection_recovery', True))
+        self.enlarge_factor = recovery_cfg.get('enlarge_factor', late_fusion_cfg.get('enlarge_factor', 0.1))
+        self.use_gaussian_likelihoods = recovery_cfg.get('use_gaussian_likelihoods', late_fusion_cfg.get('use_gaussian_likelihoods', True))
+        self.align_frustum = recovery_cfg.get('align_frustum', late_fusion_cfg.get('align_frustum', True))
         # If not None, selects a subset of point dimensions when building frustum
         # proposals for the frustum detector (e.g., [0,1,2] or [0,1,2,4]).
         self.use_dims_frustum = recovery_cfg.get('use_dims_frustum', late_fusion_cfg.get('use_dims_frustum', None))

@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing_extensions import Tuple, List, Dict, Union, Sequence
-from copy import deepcopy
 from PIL import Image
 import torch
 from torch import Tensor
@@ -50,7 +49,7 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
         # Call parent constructor
         super().__init__(late_fusion_cfg, device)
         
-        self.num_views = late_fusion_cfg.get('num_views', 1)
+        self.num_views = self.late_fusion_cfg.get('num_views', 1)
         
         # Handle transformation matrices for multiple views
         self.lidar_to_cam = []
@@ -274,7 +273,7 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
                     matched_bboxes_2d, matched_scores_2d, matched_labels_2d
                 )
         else:
-            matched_bboxes_3d = bboxes_3d.new_empty((0, 7))
+            matched_bboxes_3d = bboxes_3d.new_empty((0, bboxes_3d.shape[1]))
             matched_scores_3d = scores_3d.new_empty((0,))
             matched_labels_3d = labels_3d.new_empty((0,), dtype=torch.long)
         
@@ -287,6 +286,12 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             )
             
             if recovered_bboxes_3d.shape[0] > 0:
+                # Pad recovered boxes if 3D detector outputs more dims (e.g. 9D with velocity vs 7D frustum output)
+                if recovered_bboxes_3d.shape[1] < matched_bboxes_3d.shape[1]:
+                    pad = matched_bboxes_3d.shape[1] - recovered_bboxes_3d.shape[1]
+                    recovered_bboxes_3d = torch.cat(
+                        [recovered_bboxes_3d, recovered_bboxes_3d.new_zeros((recovered_bboxes_3d.shape[0], pad))], dim=1
+                    )
                 matched_bboxes_3d = torch.cat([matched_bboxes_3d, recovered_bboxes_3d], dim=0)
                 matched_scores_3d = torch.cat([matched_scores_3d, recovered_scores_3d], dim=0)
                 matched_labels_3d = torch.cat([matched_labels_3d, recovered_labels_3d], dim=0)
@@ -310,17 +315,27 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
         
         # Final NMS
         if self.use_final_nms and matched_bboxes_3d.shape[0] > 0:
-            nms_cfg = ConfigDict(use_rotate_nms=True, nms_thr=self.final_nms_cfg.get('thresh', 0.01))
-            score_thr = self.final_nms_cfg.get('score_thr', 0.0001)
-            bev_boxes_for_nms = xywhr2xyxyr(self.box_type_3d(matched_bboxes_3d, box_dim=7).bev)
+            nms_cfg = ConfigDict(use_rotate_nms=True, nms_thr=self.final_nms_cfg.get('thresh', 0.3))
+            score_thr = self.final_nms_cfg.get('score_thr', 0.01)
+            box_dim = matched_bboxes_3d.shape[-1]
+            bev_boxes_for_nms = xywhr2xyxyr(self.box_type_3d(matched_bboxes_3d, box_dim=box_dim).bev)
             scores_for_nms = matched_bboxes_3d.new_zeros((matched_scores_3d.shape[0], self.num_classes), dtype=torch.float32)
             scores_for_nms[torch.arange(matched_scores_3d.shape[0], dtype=torch.long), matched_labels_3d.long()] = matched_scores_3d
-            matched_bboxes_3d, matched_scores_3d, matched_labels_3d = box3d_multiclass_nms(
-                matched_bboxes_3d, bev_boxes_for_nms, scores_for_nms,
-                score_thr=score_thr, max_num=10000, cfg=nms_cfg)
+            # Separate velocity attributes (cols 7+) before NMS, re-attach after (mirrors old code behaviour)
+            attrs = matched_bboxes_3d[:, 7:] if box_dim > 7 else None
+            boxes_7d = matched_bboxes_3d[:, :7]
+            nms_results = box3d_multiclass_nms(
+                boxes_7d, bev_boxes_for_nms, scores_for_nms,
+                score_thr=score_thr, max_num=100, cfg=nms_cfg,
+                mlvl_attr_scores=attrs)
+            if attrs is None:
+                matched_bboxes_3d, matched_scores_3d, matched_labels_3d = nms_results
+            else:
+                matched_bboxes_3d, matched_scores_3d, matched_labels_3d, attrs = nms_results
+                matched_bboxes_3d = torch.cat([matched_bboxes_3d, attrs], dim=-1)
         
         final_detections = InstanceData()
-        final_detections.bboxes_3d = self.box_type_3d(matched_bboxes_3d)
+        final_detections.bboxes_3d = self.box_type_3d(matched_bboxes_3d, box_dim=matched_bboxes_3d.shape[-1])
         final_detections.scores_3d = matched_scores_3d
         final_detections.labels_3d = matched_labels_3d
         return final_detections
@@ -435,7 +450,7 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
         # Initialize result dict
         result = {
             'oov_mask': ~valid_mask,  # OOV = not valid in this view
-            'matched_bboxes_3d': bboxes_3d.new_empty((0, 7)),
+            'matched_bboxes_3d': bboxes_3d.new_empty((0, bboxes_3d.shape[1])),
             'matched_scores_3d': scores_3d.new_empty((0,)),
             'matched_labels_3d': labels_3d.new_empty((0,), dtype=torch.long),
             'matched_bboxes_2d': bboxes_2d.new_empty((0, 4)),
@@ -698,11 +713,9 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
                     ])
                     frustum_pc[:, :3] = rotation_matrix.matmul(frustum_pc[:, :3].t()).t()
                 
-                # Prepare data sample
-                data_sample = deepcopy(collate_data['data_samples'][0])
-                metainfo = data_sample.metainfo
-                metainfo['one_hot_vector'] = one_hot_vectors[idx, :]
-                data_sample.set_metainfo(metainfo)
+                # Prepare data sample (reuse the same object — set_metainfo overwrites one_hot_vector each iter)
+                data_sample = collate_data['data_samples'][0]
+                data_sample.set_metainfo({'one_hot_vector': one_hot_vectors[idx, :]})
                 
                 proposal = {
                     'data_samples': [data_sample],
@@ -724,18 +737,16 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
                     new_scores_3d = unmatched_scores_2d[idx].unsqueeze(0).expand(new_bboxes_3d.shape[0])
                     new_labels_3d = unmatched_labels_2d[idx].unsqueeze(0).expand(new_bboxes_3d.shape[0])
                 
-                new_bboxes_3d = new_bboxes_3d.cpu()
-                
-                # De-align frustum
+                # De-align frustum (rotation_matrix is on self.device; keep new_bboxes_3d on same device)
                 if self.align_frustum:
                     new_bboxes_3d[:, :3] = torch.linalg.inv(rotation_matrix).matmul(new_bboxes_3d[:, :3].t()).t()
                     new_bboxes_3d[:, -1] += yaw_lidar
-                
+
                 # Center adjustment (required by project_bboxes which treats z as center)
                 new_bboxes_3d[:, 2] += new_bboxes_3d[:, 5] / 2
 
-                # IoU filtering with 2D box
-                bboxes_proj = project_bboxes(new_bboxes_3d, cam_to_img, lidar=True, Tr_velo_to_cam=lidar_to_cam)
+                # IoU filtering with 2D box — project_bboxes is pure PyTorch, works on any device
+                bboxes_proj = project_bboxes(new_bboxes_3d, cam_to_img, lidar=True, T=lidar_to_cam)
                 ious = self.iou_calculator(bboxes_proj, unmatched_bboxes_2d[idx:idx+1], mode='iou', is_aligned=False)
                 iou_filter = ious.squeeze(1) > self.recovery_iou_thr
 
@@ -744,8 +755,8 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
 
                 if iou_filter.sum() > 0:
                     frustum_bboxes.append(new_bboxes_3d[iou_filter])
-                    frustum_scores.append(new_scores_3d[iou_filter].cpu() if isinstance(new_scores_3d, Tensor) else new_scores_3d[iou_filter])
-                    frustum_labels.append(new_labels_3d[iou_filter].cpu() if isinstance(new_labels_3d, Tensor) else new_labels_3d[iou_filter])
+                    frustum_scores.append(new_scores_3d[iou_filter] if isinstance(new_scores_3d, Tensor) else torch.tensor(new_scores_3d[iou_filter], device=self.device))
+                    frustum_labels.append(new_labels_3d[iou_filter] if isinstance(new_labels_3d, Tensor) else torch.tensor(new_labels_3d[iou_filter], device=self.device))
             
             # Aggregate frustum detections for this view
             if len(frustum_bboxes) > 0:
