@@ -9,15 +9,8 @@
 
     "truncation_factor_thr": 0.0,
 
-    "use_clustering": true,
-    "clustering_method": "connected_components",
+    "use_clustering": false,
     "use_cliques": false,
-    "cluster_bev_iou_thr": 0.5,
-    "cluster_bev_iou_thr_cc": 0.5,
-    "cluster_bev_iou_thr_clique": 0.3,
-    "cluster_iou_thr": 0.1,
-    "cluster_iou_thr_cc": 0.1,
-    "cluster_iou_thr_clique": 0.1,
 
     "align_frustum": true,
     "use_gaussian_likelihoods": true,
@@ -72,8 +65,8 @@
     },
 
     "detector3d": {
-        "nms_thr": 0.9,
-        "nms_pre": 10000,
+        "nms_thr": 0.2,
+        "nms_pre": 1000,
         "max_num": 500,
         "score_thr": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
         "valid_labels_3d": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],

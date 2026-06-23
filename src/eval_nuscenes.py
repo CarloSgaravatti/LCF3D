@@ -238,11 +238,18 @@ if __name__ == '__main__':
 
         serialized_boxes = []
         for box in boxes_global:
+            # NuScenesEval rejects any box with a non-positive or NaN dimension
+            # ("Error: sample_result sizes must be >0.") and aborts the whole eval.
+            # A few recovered/frustum boxes can come out degenerate, so drop them here.
+            wlh = box.wlh.tolist()
+            center = box.center.tolist()
+            if any((v is None) or np.isnan(v) for v in wlh + center) or any(v <= 0 for v in wlh):
+                continue
             name, attr = _get_nuscenes_attr(box, class_names)
             serialized_boxes.append({
                 'sample_token': sample_token,
-                'translation': box.center.tolist(),
-                'size': box.wlh.tolist(),
+                'translation': center,
+                'size': wlh,
                 'rotation': box.orientation.elements.tolist(),
                 'velocity': box.velocity[:2].tolist(),
                 'detection_name': name,

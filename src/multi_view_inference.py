@@ -651,7 +651,10 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             unmatched_masks_2d_list: Optional list of instance masks for 2D detections (for mask-aware filtering)
         """
         scan = collate_data['inputs']['points'][0].to(self.device)
-        scan = scan[scan[:, 0] > 0]
+        # NOTE: do NOT filter points by x>0. That keeps only the front half of the
+        # LiDAR sweep and kills frustum recovery for the 3 rear cameras (BACK_*),
+        # hurting recall on small/recovery-dependent classes. The original code
+        # (multi_view_single_frustum_with_cluster.py) uses the full point cloud.
 
         scan_for_frustum = scan
         if getattr(self, 'use_dims_frustum', None) is not None:
