@@ -385,14 +385,18 @@ class LateFusionMultiViewInferencer(BaseLateFusionInferencer):
             score_thr = self.final_nms_cfg.get('score_thr', 0.01)
             box_dim = matched_bboxes_3d.shape[-1]
             bev_boxes_for_nms = xywhr2xyxyr(self.box_type_3d(matched_bboxes_3d, box_dim=box_dim).bev)
-            scores_for_nms = matched_bboxes_3d.new_zeros((matched_scores_3d.shape[0], self.num_classes), dtype=torch.float32)
+            # +1 column: box3d_multiclass_nms treats the LAST score column as background
+            # and skips it (num_classes = scores.shape[1] - 1). Without the +1 the last
+            # real class (barrier, idx 9) lands in the background column and is dropped.
+            scores_for_nms = matched_bboxes_3d.new_zeros((matched_scores_3d.shape[0], self.num_classes + 1), dtype=torch.float32)
             scores_for_nms[torch.arange(matched_scores_3d.shape[0], dtype=torch.long), matched_labels_3d.long()] = matched_scores_3d
             # Separate velocity attributes (cols 7+) before NMS, re-attach after (mirrors old code behaviour)
             attrs = matched_bboxes_3d[:, 7:] if box_dim > 7 else None
             boxes_7d = matched_bboxes_3d[:, :7]
+            post_max_size = self.final_nms_cfg.get('post_max_size', 500)
             nms_results = box3d_multiclass_nms(
                 boxes_7d, bev_boxes_for_nms, scores_for_nms,
-                score_thr=score_thr, max_num=100, cfg=nms_cfg,
+                score_thr=score_thr, max_num=post_max_size, cfg=nms_cfg,
                 mlvl_attr_scores=attrs)
             if attrs is None:
                 matched_bboxes_3d, matched_scores_3d, matched_labels_3d = nms_results
